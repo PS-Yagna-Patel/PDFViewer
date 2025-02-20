@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Item, Menu, useContextMenu } from 'react-contexify';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 import 'react-contexify/dist/ReactContexify.css';
@@ -8,32 +7,19 @@ import './PDFViewer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
  
-const MENU_ID = 'pdf-context-menu';
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
  
 const PdfViewer: React.FC = () => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
-  const [selectedText, setSelectedText] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [popupPosition, setPopupPosition] = useState<{ top: number; left: number } | null>(null);
-  const [isEditableKey,setIsEditableKey] = useState<boolean>(false);
-  const [isEditableValue,setIsEditableValue] = useState<boolean>(false);
+  const [contextMenu, setContextMenu] = useState<{ top: number; left: number; text: string } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pdfContainerRef = useRef<HTMLInputElement>(null);
-  const { show } = useContextMenu({
-    id: MENU_ID,
-  });
- 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    console.log(name,value);
-  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -55,7 +41,7 @@ const PdfViewer: React.FC = () => {
  
     setFile(selectedFile);
     setPageNumber(1);
-    setSelectedText('');
+    setContextMenu(null);
   };
 
   const handleDoubleClick = (event: React.MouseEvent) => {
@@ -63,6 +49,10 @@ const PdfViewer: React.FC = () => {
     event.stopPropagation();
   };
   
+  const handleSingleClick = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
  
   const handleDragOver = (event: React.DragEvent) => {
     event.preventDefault();
@@ -77,7 +67,7 @@ const PdfViewer: React.FC = () => {
     if (droppedFile?.type === 'application/pdf') {
       setFile(droppedFile);
       setPageNumber(1);
-      setSelectedText('');
+      setContextMenu(null);
     } else {
       setError('Please drop a PDF file');
     }
@@ -88,32 +78,25 @@ const PdfViewer: React.FC = () => {
     setLoading(false);
   };
  
-  // New: Handle Text Selection and Positioning of Popup
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    
-    if (selection && selection.toString().trim()) {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      
-      setSelectedText(selection.toString().trim());
-
-      setPopupPosition({
-        top: rect.top + window.scrollY + rect.height,
-        left: rect.left + window.scrollX,
-      });
-    }
-  };
- 
   const handleContextMenu = (event: React.MouseEvent) => {
     event.preventDefault();
     const selection = window.getSelection();
+    
     if (selection && selection.toString().trim()) {
-      show({ event });
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        setContextMenu({
+            top: rect.top + window.scrollY + rect.height,
+            left: rect.left + window.scrollX,
+            text: selection.toString().trim(),
+        });
     }
-  };
+};
+
  
   const handlePageChange = (delta: number) => {
+    setContextMenu(null);
     if (numPages) {
       const newPage = pageNumber + delta;
       if (newPage >= 1 && newPage <= numPages) {
@@ -126,29 +109,15 @@ const PdfViewer: React.FC = () => {
     const newScale = Math.max(0.5, Math.min(2.0, scale + delta));
     setScale(newScale);
   };
- 
-  const copySelectedText = () => {
-    if (selectedText) {
-      navigator.clipboard.writeText(selectedText)
-        .then(() => {
-          alert('Text copied to clipboard!');
-        })
-        .catch((err) => {
-          console.error('Failed to copy text:', err);
-          alert('Failed to copy text. Please try again.');
-        });
-    }
-  };
+
   useEffect(() => {
-    document.addEventListener('mouseup', handleTextSelection);
-    return () => {
-      document.removeEventListener('mouseup', handleTextSelection);
-    };
-  }, []);
- 
+    const handleClickOutside = () => setContextMenu(null);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+}, []);
+
   return (
-    <div className="pdf-viewer-container" ref={containerRef} onDoubleClick={handleDoubleClick}>
-      {/* File Upload Area */}
+    <div className="pdf-viewer-container" ref={containerRef} >
       {!file && (
         <div
           className="upload-area"
@@ -189,7 +158,6 @@ const PdfViewer: React.FC = () => {
  
       {file && (
         <>
-          {/* Controls */}
           <div className="pdf-controls">
             <button onClick={() => setFile(null)} className="control-button">
               Change PDF
@@ -212,7 +180,6 @@ const PdfViewer: React.FC = () => {
             </button>
           </div>
  
-          {/* PDF Document */}
           <div className="pdf-document-container" onContextMenu={handleContextMenu}>
             <Document
               file={file}
@@ -228,80 +195,45 @@ const PdfViewer: React.FC = () => {
               />
             </Document>
           </div>
- 
-          {/* Context Box for Selected Text */}
-          {selectedText && popupPosition && (
-            <div
-              className="selected-text-container"
-              style={{
-                position: 'absolute',
-                top: `${popupPosition.top}px`,
-                left: `${popupPosition.left}px`,
-                backgroundColor: 'white',
-                padding: '10px',
-                borderRadius: '5px',
-                boxShadow: '0px 0px 5px rgba(0, 0, 0, 0.2)',
-                zIndex: 9999
-              }}
-            >
-              <form>
-            {isEditableKey ? 
+          {contextMenu && (
+    <div
+        className="context-menu"
+        style={{
+            position: 'absolute',
+            top: `${contextMenu.top}px`,
+            left: `${contextMenu.left}px`,
+            backgroundColor: 'white',
+            padding: '10px',
+            borderRadius: '5px',
+            boxShadow: '0px 0px 5px rgba(0, 0, 0, 0.2)',
+            zIndex: 9999
+        }}
+        onClick={(e)=>e.stopPropagation()}
+    >
+        <form>
             <div className="form-group">
-              <label htmlFor="key">Key : </label>
-              <input 
-                type="text" 
-                name="key" 
-                defaultValue={selectedText}
-                onChange={handleInputChange}
-                onClick={()=>setIsEditableKey(!isEditableKey)}
-                className="form-input"
-              />
+                <label htmlFor="key">Key:</label>
+                <input 
+                    type="text" 
+                    name="key" 
+                    defaultValue={contextMenu.text}
+                    className="form-input"
+                />
             </div>
-            :
             <div className="form-group">
-              <label htmlFor="key">Key : </label>
-              <input 
-                type="text" 
-                name="key" 
-                value={selectedText}
-                onChange={handleInputChange}
-                onClick={()=>setIsEditableKey(!isEditableKey)}
-                className="form-input"
-              />
+                <label htmlFor="value">Value:</label>
+                <input 
+                    type="text" 
+                    name="value" 
+                    defaultValue={contextMenu.text}
+                    className="form-input"
+                />
             </div>
-            }
-            {isEditableValue ? 
-              <div className="form-group">
-              <label htmlFor="value">Value : </label>
-              <input 
-                type="text" 
-                name="value" 
-                value={selectedText}
-                onChange={handleInputChange}
-                onClick={()=>setIsEditableValue(!isEditableValue)}
-                className="form-input"
-              />
-            </div> :
-            <div className="form-group">
-            <label htmlFor="value">Value : </label>
-            <input 
-              type="text" 
-              name="value" 
-              defaultValue={selectedText}
-              onChange={handleInputChange}
-              onClick={()=>setIsEditableValue(!isEditableValue)}
-              className="form-input"
-            />
-          </div>}
-          </form>
-              <div className="menu-item" onClick={copySelectedText}>
-                Copy Selected Text
-              </div>
-              <div className="menu-item" onClick={() => alert(selectedText)}>
-                Show Selected Text
-              </div>
-            </div>
-          )}
+        </form>
+        <button onClick={() => setContextMenu(null)}>Close</button>
+    </div>
+)}
+
         </>
       )}
     </div>
